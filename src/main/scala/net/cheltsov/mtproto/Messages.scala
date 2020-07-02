@@ -1,18 +1,11 @@
 package net.cheltsov.mtproto
 
-import java.security.{MessageDigest, PrivateKey, PublicKey}
-
-import javax.crypto.Cipher
 import scodec.Attempt.Failure
-import scodec.bits.{BitVector, ByteVector}
+import scodec.bits.ByteVector
 import scodec.codecs._
 import scodec.{Codec, Err}
 
 object Messages {
-
-  private val cipher: Cipher = Cipher.getInstance("RSA/ECB/NoPadding")
-
-  private val digest = MessageDigest.getInstance("SHA-1")
 
   case class DecodedMessage(authKeyId: Long, messageId: Long, message: MTProtoMessage)
 
@@ -29,12 +22,10 @@ object Messages {
                          p: Long,
                          q: Long,
                          publicKeyFingerprint: Long,
-                         encryptedData: EncryptedPQInnerData)
+                         encryptedData: ByteVector)
       extends RequestMessage
 
   case class PQInnerData(pq: BigInt, p: Long, q: Long, nonce: BigInt, serverNonce: BigInt, newNonce: BigInt)
-
-  case class EncryptedPQInnerData(data: ByteVector)
 
   case class ResPQ(nonce: BigInt,
                    serverNonce: BigInt,
@@ -86,7 +77,7 @@ object Messages {
         ("p" | int64L) ::
         ("q" | int64L) ::
         ("public_key_fingerprint" | int64L) ::
-        ("encrypted_data" | bytes(256).as[EncryptedPQInnerData])
+        ("encrypted_data" | bytes(256))
     }.dropUnits.as[ReqDHParams]
   }
 
@@ -102,25 +93,6 @@ object Messages {
         ("server_nonce" | bigIntCodec(16)) ::
         ("new_nonce" | bigIntCodec(32))
     }.dropUnits.as[PQInnerData]
-  }
-
-  object EncryptedPQInnerData {
-    def encrypt(innerData: PQInnerData, publicKey: PublicKey): EncryptedPQInnerData = {
-      val data: Array[Byte] = PQInnerData.codec.encode(innerData).require.toByteArray
-      val hash = digest.digest(data)
-      cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-      val encryptedBytes = cipher.doFinal(hash ++ data)
-      EncryptedPQInnerData(ByteVector(encryptedBytes))
-    }
-
-    def decrypt(encryptedPQInnerData: EncryptedPQInnerData, privateKey: PrivateKey): PQInnerData = {
-      val encryptedBytes: Array[Byte] = encryptedPQInnerData.data.toArray
-      cipher.init(Cipher.DECRYPT_MODE, privateKey)
-      val allData = cipher.doFinal(encryptedBytes)
-      val decryptPQInnerDataArray = allData.drop(160)
-      val decryptPQInnerData = PQInnerData.codec.decodeValue(BitVector(decryptPQInnerDataArray)).require
-      decryptPQInnerData
-    }
   }
 
   object ResPQ {

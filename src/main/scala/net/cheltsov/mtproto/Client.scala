@@ -10,7 +10,6 @@ object Client {
     IO(AsynchronousSocketChannel.open())
   }
 
-
   def connect(client: AsynchronousSocketChannel)(host: String, port: Int): IO[Throwable, Unit] = {
     IO.effectAsync { callback =>
       client.connect(new InetSocketAddress(host, port), (), new CompletionHandler[Void, Unit] {
