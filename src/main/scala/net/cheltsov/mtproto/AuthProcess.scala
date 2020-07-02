@@ -1,11 +1,10 @@
 package net.cheltsov.mtproto
 
-import java.nio.ByteBuffer
-import java.nio.channels.{AsynchronousSocketChannel, CompletionHandler}
+import java.nio.channels.AsynchronousSocketChannel
 
-import net.cheltsov.mtproto.Messages.{DecodedMessage, ReqDHParams, ReqPQ}
-import scodec.bits.BitVector
-import zio.{IO, Ref, UIO}
+import net.cheltsov.mtproto.Helpers._
+import net.cheltsov.mtproto.Messages._
+import zio.{IO, Ref, Task, UIO}
 
 sealed trait StateValue
 
@@ -17,64 +16,37 @@ case object Done extends StateValue
 
 case class State(state: StateValue)
 
-//TODO There is not a reason to use Ref[A]. It is not concurrent environment
 class AuthProcess (state: Ref[State], client: AsynchronousSocketChannel) {
 
-  def process(): IO[Throwable, Unit] = {
+  def process: Task[Int] =
+    processLogic
+      .bracket(_ => UIO(client.close()))(_ => Task(0))
 
+  private val processLogic: IO[Throwable, Unit] =
     for {
-      waitPQ <- state.get
-      reqPQ <- waitPQ match {
-        case State(WaitForReqPQ) => readMTProtoMessage
+      initialState <- state.get
+      reqPQ <- initialState match {
+        case State(WaitForReqPQ) => client.readMTProtoMessage()
+        case s => IO.fail(new IllegalStateException(s"Illegal state: $s"))
       }
       _ <- reqPQ match {
         case DecodedMessage(_, _, _: ReqPQ) => state.set(State(WaitForReqDHParams))
+        case m => IO.fail(new IllegalStateException(s"Waiting for reqPQ but got: $m"))
       }
-      _ <- writeMTProtoMessage(null)
-      reqPQParams <- readMTProtoMessage
-      _ <- state.set(State(Done))
-    } yield println(reqPQParams)
-
-  }
-
-  //TODO make private
-  def readMTProtoMessage: IO[Throwable, DecodedMessage] = {
-    val buffer = ByteBuffer.allocate(1024)
-    IO.effectAsync { callback =>
-      client.read(buffer, (), new CompletionHandler[Integer, Unit] {
-        override def completed(result: Integer, attachment: Unit): Unit = {
-          buffer.flip()
-          callback(IO.fromTry(DecodedMessage.codec.decodeValue(BitVector(buffer)).toTry))
-        }
-
-        override def failed(exc: Throwable, attachment: Unit): Unit = callback(IO.fail(exc))
-      })
-    }
-  }
-
-  //TODO make private
-  def writeMTProtoMessage(message: DecodedMessage): IO[Throwable, Int] = {
-    IO.fromTry(DecodedMessage.codec.encode(message).toTry)
-      .map(bv => ByteBuffer.wrap(bv.toByteArray))
-      .flatMap { bytes =>
-        IO.effectAsync { callback =>
-          client.write(bytes, (), new CompletionHandler[Integer, Unit] {
-            override def completed(result: Integer, attachment: Unit): Unit = callback(IO.succeed(result))
-
-            override def failed(exc: Throwable, attachment: Unit): Unit = callback(IO.fail(exc))
-          })
-        }
+      //TODO create message with random data
+      _ <- client.writeMTProtoMessage(DecodedMessage(412, 5, ResPQ(BigInt(2), BigInt(996999699693L), BigInt(77885L), VectorLong(List[Long](1L, 99L)))))
+      _ <- state.set(State(WaitForReqDHParams)) //TODO Looks like there is not a reason yo change it
+      reqDHParams <- client.readMTProtoMessage()
+      _ <- reqDHParams match {
+        case DecodedMessage(_, _, m: ReqDHParams) => println(m);state.set(State(Done))
+        case m => IO.fail(new IllegalStateException(s"Waiting for ReqDHParams but got: $m"))
       }
-  }
-
-  def stop: UIO[Unit] = IO(client.close()).catchAll { e =>
-    UIO(println(e))
-  }
-
+      _ <- state.set(State(Done)) //TODO Looks like there is not a reason yo change it
+    } yield ()
 }
 
 object AuthProcess {
   def apply(client: AsynchronousSocketChannel): IO[Throwable, AuthProcess] = {
-    Ref.make(State(WaitForReqDHParams)).map(new AuthProcess(_, client))
+    Ref.make(State(WaitForReqPQ)).map(new AuthProcess(_, client))
   }
 }

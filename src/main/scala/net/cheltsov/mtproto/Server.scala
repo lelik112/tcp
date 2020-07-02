@@ -1,11 +1,8 @@
 package net.cheltsov.mtproto
 
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 import java.nio.channels.{AsynchronousServerSocketChannel, AsynchronousSocketChannel, CompletionHandler}
 
-import net.cheltsov.mtproto.Messages.DecodedMessage
-import scodec.bits.BitVector
 import zio.{IO, UIO}
 
 object Server {
@@ -23,7 +20,5 @@ object Server {
     }
   }
 
-  def stop(server: AsynchronousServerSocketChannel): UIO[Unit] = IO(server.close()).catchAll { e =>
-    UIO(println(e))
-  }
+  def stop(server: AsynchronousServerSocketChannel): UIO[Unit] = UIO(server.close())
 }
