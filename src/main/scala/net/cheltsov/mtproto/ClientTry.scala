@@ -11,8 +11,8 @@ import net.cheltsov.mtproto.Messages.{DecodedMessage, EncryptedPQInnerData, PQIn
 object ClientTry extends App {
 
   val encryptData = encrypt(PQInnerData(BigInt(2), 6L, 7L, BigInt(996999699693L), BigInt(77887878L), BigInt(55)), KeyHolder.publicKey)
-//  val decryptData = decrypt(encryptData, KeyHolder.privateKey)
-  println(encryptData)
+  val decryptData = decrypt(encryptData, KeyHolder.privateKey)
+  println(decryptData)
 
 
   val client = AsynchronousSocketChannel.open
@@ -20,8 +20,8 @@ object ClientTry extends App {
   val future = client.connect(hostAddress)
   val buffer: ByteBuffer = ByteBuffer.wrap(DecodedMessage
     .codec
-//    .encode(DecodedMessage(513, 3, ReqPQ(BigInt(2))))
-    .encode(DecodedMessage(412, 5, ReqDHParams(BigInt(2), BigInt(996999699693L), 6L, 7L, 8L, encryptData)))
+    .encode(DecodedMessage(513, 3, ReqPQ(BigInt(2))))
+//    .encode(DecodedMessage(412, 5, ReqDHParams(BigInt(2), BigInt(996999699693L), 6L, 7L, 8L, encryptData)))
 //    .encode(DecodedMessage(412, 5, ResPQ(BigInt(2), BigInt(996999699693L), BigInt(77885L), VectorLong(List[Long](1L, 99L)))))
     .require
     .bytes.toArray)

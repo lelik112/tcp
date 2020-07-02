@@ -12,7 +12,7 @@ import net.cheltsov.mtproto.Messages.EncryptedPQInnerData._
 import scala.concurrent.{ExecutionContext, Future}
 
 
-object ServerTry extends App {
+object ServerTry  {
 
   implicit val ec: ExecutionContext = ExecutionContext.global
 //  val serverOld: ServerSocket = new ServerSocket(669)

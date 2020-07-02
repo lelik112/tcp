@@ -1,9 +1,6 @@
 package net.cheltsov.mtproto
 
-import java.nio.ByteBuffer
-import java.nio.charset.StandardCharsets
-import java.security.{KeyPair, KeyPairGenerator, MessageDigest, PrivateKey, PublicKey, Signature}
-import java.security.interfaces.RSAPublicKey
+import java.security.{MessageDigest, PrivateKey, PublicKey}
 
 import javax.crypto.Cipher
 import scodec.Attempt.Failure
@@ -37,7 +34,7 @@ object Messages {
 
   case class PQInnerData(pq: BigInt, p: Long, q: Long, nonce: BigInt, serverNonce: BigInt, newNonce: BigInt)
 
-  case class EncryptedPQInnerData(data: String)
+  case class EncryptedPQInnerData(data: ByteVector)
 
   case class ResPQ(nonce: BigInt,
                    serverNonce: BigInt,
@@ -89,7 +86,7 @@ object Messages {
         ("p" | int64L) ::
         ("q" | int64L) ::
         ("public_key_fingerprint" | int64L) ::
-        ("encrypted_data" | utf8_32L.as[EncryptedPQInnerData])
+        ("encrypted_data" | bytes(256).as[EncryptedPQInnerData])
     }.dropUnits.as[ReqDHParams]
   }
 
@@ -111,51 +108,16 @@ object Messages {
     def encrypt(innerData: PQInnerData, publicKey: PublicKey): EncryptedPQInnerData = {
       val data: Array[Byte] = PQInnerData.codec.encode(innerData).require.toByteArray
       val hash = digest.digest(data)
-      val encodedKey = publicKey.getEncoded.takeRight(140) //TODO not sure about this
       cipher.init(Cipher.ENCRYPT_MODE, publicKey)
       val encryptedBytes = cipher.doFinal(hash ++ data)
-      val encryptedString: String = new String(encryptedBytes, StandardCharsets.UTF_8)
-      val bytes = encryptedString.getBytes(StandardCharsets.UTF_8)
-//      val encryptedString: String = ascii32L.decodeValue(BitVector(encryptedBytes)).require
-//      println("*******" + encryptedString)
-      EncryptedPQInnerData(encryptedString)
-
-
-//      val encodedKey = new Array[Byte](140)// publicKey.getEncoded.takeRight(140) //TODO not sure about this
-//      //      val newEncodedKey = encodedKey.map(_ => 3.asInstanceOf[Byte])
-//      val size = hash ++ data ++ encodedKey
-//      cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-//      var goodKey = publicKey
-//      var flag = false
-//      var bytes: Array[Byte] = null
-//
-//      while (!flag) {
-//        try {
-//          val newEncodedKey = goodKey.getEncoded.takeRight(140)
-//          val toEncode = hash ++ data ++ newEncodedKey
-//          bytes = cipher.doFinal(toEncode)
-//          true
-//        } catch {
-//          case _: Throwable => {
-//            println("****************")
-//            val keyPairGenerator: KeyPairGenerator = KeyPairGenerator.getInstance("RSA")
-//            keyPairGenerator.initialize(2048)
-//            val keyPair: KeyPair = keyPairGenerator.generateKeyPair
-//            goodKey = keyPair.getPublic
-//            println(goodKey)
-//            cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-//          }
-//        }
-
-      }
+      EncryptedPQInnerData(ByteVector(encryptedBytes))
+    }
 
     def decrypt(encryptedPQInnerData: EncryptedPQInnerData, privateKey: PrivateKey): PQInnerData = {
-      val encryptedString: String = encryptedPQInnerData.data
-      val encryptedBytes: Array[Byte] = encryptedString.getBytes(StandardCharsets.UTF_8)
-
+      val encryptedBytes: Array[Byte] = encryptedPQInnerData.data.toArray
       cipher.init(Cipher.DECRYPT_MODE, privateKey)
       val allData = cipher.doFinal(encryptedBytes)
-      val decryptPQInnerDataArray = allData.drop(20).dropRight(140)
+      val decryptPQInnerDataArray = allData.drop(160)
       val decryptPQInnerData = PQInnerData.codec.decodeValue(BitVector(decryptPQInnerDataArray)).require
       decryptPQInnerData
     }
