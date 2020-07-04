@@ -5,7 +5,7 @@ import java.nio.channels.{AsynchronousSocketChannel, CompletionHandler}
 import java.security.{MessageDigest, PrivateKey, PublicKey}
 
 import javax.crypto.Cipher
-import net.cheltsov.mtproto.Messages.{DecodedMessage, PQInnerData, cipher, digest}
+import net.cheltsov.mtproto.Messages.{DecodedMessage, PQInnerData}
 import scodec.bits.{BitVector, ByteVector}
 import zio.IO
 

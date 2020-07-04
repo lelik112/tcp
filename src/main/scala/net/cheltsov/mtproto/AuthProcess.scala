@@ -3,6 +3,7 @@ package net.cheltsov.mtproto
 import java.nio.channels.AsynchronousSocketChannel
 
 import net.cheltsov.mtproto.Helpers._
+import net.cheltsov.mtproto.Random._
 import net.cheltsov.mtproto.Messages._
 import zio.{IO, Ref, Task, UIO, ZIO}
 import zio.console._
@@ -25,28 +26,29 @@ class AuthProcess (state: Ref[State], client: AsynchronousSocketChannel) {
 
   private val processLogic: ZIO[Console, Throwable, Unit] =
     for {
-      initialState <- state.get
-      reqPQ <- initialState match {
-        case State(WaitForReqPQ) => client.readMTProtoMessage()
-        case s => IO.fail(new IllegalStateException(s"Illegal state: $s"))
-      }
-      _ <- reqPQ match {
-        case DecodedMessage(_, _, _: ReqPQ) => state.set(State(WaitForReqDHParams))
-        case m => IO.fail(new IllegalStateException(s"Waiting for reqPQ but got: $m"))
-      }
-      _ <- putStrLn(s"Message received: $reqPQ")
-      //TODO create message with random data
-      _ <- client.writeMTProtoMessage(DecodedMessage(412, 5, ResPQ(BigInt(2), BigInt(996999699693L), BigInt(77885L), VectorLong(List[Long](1L, 99L)))))
-      _ <- state.set(State(WaitForReqDHParams)) //TODO Looks like there is not a reason yo change it
-      reqDHParams <- client.readMTProtoMessage()
-      _ <- reqDHParams match {
-        case DecodedMessage(_, _, _: ReqDHParams) => state.set(State(Done))
-        case m => IO.fail(new IllegalStateException(s"Waiting for ReqDHParams but got: $m"))
-      }
-      _ <- putStrLn(s"Message received: $reqDHParams")
-      pQInnerData <- KeyHolder.privateKey.decryptPQInnerData(reqDHParams.message.asInstanceOf[ReqDHParams].encryptedData)
-      _ <- putStrLn(s"Secret message: $pQInnerData")
-      _ <- state.set(State(Done)) //TODO Looks like there is not a reason yo change it
+      initialState  <- state.get
+      reqPQ         <- initialState match {
+                        case State(WaitForReqPQ) => client.readMTProtoMessage()
+                        case s => IO.fail(new IllegalStateException(s"Illegal state: $s"))
+                      }
+      _             <- reqPQ match {
+                        case DecodedMessage(_, _: ReqPQ) => state.set(State(WaitForReqDHParams))
+                        case m => IO.fail(new IllegalStateException(s"Waiting for reqPQ but got: $m"))
+                      }
+      _             <- putStrLn(s"Message received: $reqPQ")
+      resPQ         <- nextResPQ
+      _             <- putStrLn(s"Sending message: $resPQ")
+      _             <- client.writeMTProtoMessage(resPQ)
+      _             <- state.set(State(WaitForReqDHParams))
+      reqDHParams   <- client.readMTProtoMessage()
+      _             <- putStrLn(s"Message received: $reqDHParams")
+      encryptedData <- reqDHParams match {
+                        case DecodedMessage(_, ReqDHParams(_, _, _, _, _, encryptedData)) => IO(encryptedData)
+                        case m => IO.fail(new IllegalStateException(s"Waiting for ReqDHParams but got: $m"))
+                      }
+      pQInnerData   <- KeyHolder.privateKey.decryptPQInnerData(encryptedData)
+      _             <- putStrLn(s"Secret message: $pQInnerData")
+      _             <- state.set(State(Done))
     } yield ()
 }
 

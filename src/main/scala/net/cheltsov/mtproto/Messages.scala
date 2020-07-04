@@ -7,45 +7,43 @@ import scodec.{Codec, Err}
 
 object Messages {
 
-  case class DecodedMessage(authKeyId: Long, messageId: Long, message: MTProtoMessage)
+  case class DecodedMessage(messageId: Long, message: MTProtoMessage)
 
   sealed trait MTProtoMessage
 
-  sealed trait RequestMessage extends MTProtoMessage
-
-  sealed trait ResponseMessage extends MTProtoMessage
-
-  case class ReqPQ(nonce: BigInt) extends RequestMessage
+  case class ReqPQ(nonce: BigInt) extends MTProtoMessage
 
   case class ReqDHParams(nonce: BigInt,
                          serverNonce: BigInt,
-                         p: Long,
-                         q: Long,
+                         p: Int,
+                         q: Int,
                          publicKeyFingerprint: Long,
                          encryptedData: ByteVector)
-      extends RequestMessage
+      extends MTProtoMessage {
+    override def toString = s"ReqDHParams($nonce, $serverNonce, $p, $q, $publicKeyFingerprint, encrypted data)"
+  }
 
-  case class PQInnerData(pq: BigInt, p: Long, q: Long, nonce: BigInt, serverNonce: BigInt, newNonce: BigInt)
+  case class PQInnerData(pq: Long, p: Int, q: Int, nonce: BigInt, serverNonce: BigInt, newNonce: BigInt)
 
   case class ResPQ(nonce: BigInt,
                    serverNonce: BigInt,
-                   pq: BigInt,
+                   pq: Long,
                    serverPublicKeyFingerprints: VectorLong)
-      extends RequestMessage
+      extends MTProtoMessage
 
   case class VectorLong(longs: List[Long])
 
   object DecodedMessage {
     val codec: Codec[DecodedMessage] = {
-      ("auth_key_id" | int64L) ::
-        ("message_id" | int64L) ::
+      ("auth_key_id" | constant(int64.encode(0).require)) ::
+        ("message_id" | int64) ::
         ("message_data" | MTProtoMessage.codec)
     }.as[DecodedMessage]
   }
 
   object MTProtoMessage {
-    val codec: Codec[MTProtoMessage] = variableSizeBytes(int32L, bytes).exmapc[MTProtoMessage](bv => {
-      int32L.decodeValue(bv.bits).flatMap {
+    val codec: Codec[MTProtoMessage] = variableSizeBytes(int32, bytes).exmapc[MTProtoMessage](bv => {
+      int32.decodeValue(bv.bits).flatMap {
         case ReqPQ.classId        => ReqPQ.codec.decodeValue(bv.bits)
         case ReqDHParams.classId  => ReqDHParams.codec.decodeValue(bv.bits)
         case ResPQ.classId        => ResPQ.codec.decodeValue(bv.bits)
@@ -62,7 +60,7 @@ object Messages {
   object ReqPQ {
     val classId: Int = 0x60469778
     val codec: Codec[ReqPQ] = {
-      ("constructor number" | constant(int32L.encode(classId).require)) ::
+      ("constructor number" | constant(int32.encode(classId).require)) ::
         ("nonce" | bigIntCodec(16))
     }.dropUnits.as[ReqPQ]
   }
@@ -71,12 +69,13 @@ object Messages {
     val classId: Int = 0xd712e4be
 
     val codec: Codec[ReqDHParams] = {
-      ("constructor number" | constant(int32L.encode(classId).require)) ::
+      ("constructor number" | constant(int32.encode(classId).require)) ::
         ("nonce" | bigIntCodec(16)) ::
         ("server_nonce" | bigIntCodec(16)) ::
-        ("p" | int64L) ::
-        ("q" | int64L) ::
-        ("public_key_fingerprint" | int64L) ::
+        ("p" | fixedVariableInt32Codec) ::
+        ("q" | fixedVariableInt32Codec) ::
+        ("public_key_fingerprint" | int64) ::
+        ("PQInnerData constructor number" | constant(int32.encode(PQInnerData.classId).require)) ::
         ("encrypted_data" | bytes(256))
     }.dropUnits.as[ReqDHParams]
   }
@@ -85,10 +84,10 @@ object Messages {
     val classId: Int = 0x83c95aec
 
     val codec: Codec[PQInnerData] = {
-      ("constructor number" | constant(int32L.encode(classId).require)) ::
-        ("pq" | bigIntCodec(12)) ::
-        ("p" | int64L) ::
-        ("q" | int64L) ::
+      ("constructor number" | constant(int32.encode(classId).require)) ::
+        ("pq" | fixedVariableInt64Codec) ::
+        ("p" | fixedVariableInt32Codec) ::
+        ("q" | fixedVariableInt32Codec) ::
         ("nonce" | bigIntCodec(16)) ::
         ("server_nonce" | bigIntCodec(16)) ::
         ("new_nonce" | bigIntCodec(32))
@@ -99,10 +98,10 @@ object Messages {
     val classId: Int = 0x05162463
 
     val codec: Codec[ResPQ] = {
-      ("constructor number" | constant(int32L.encode(classId).require)) ::
+      ("constructor number" | constant(int32.encode(classId).require)) ::
         ("nonce" | bigIntCodec(16)) ::
         ("server_nonce" | bigIntCodec(16)) ::
-        ("pq" | bigIntCodec(12)) ::
+        ("pq" | fixedVariableInt64Codec) ::
         ("server_public_key_fingerprints" | VectorLong.codec)
     }.dropUnits.as[ResPQ]
   }
@@ -111,14 +110,20 @@ object Messages {
     val classId: Int = 0x1cb5c415
 
     val codec: Codec[VectorLong] = {
-      ("constructor number" | constant(int32L.encode(classId).require)) ::
-        ("vector" | listOfN(int32L, int64L))
+      ("constructor number" | constant(int32.encode(classId).require)) ::
+        ("vector" | listOfN(int32, int64))
     }.dropUnits.as[VectorLong]
   }
 
-  //TODO add additional codec for doing things through strings for p, q, pq
   def bigIntCodec(size: Long): Codec[BigInt] =
     fixedSizeBytes(size, bytes).xmapc(bv => BigInt(bv.reverse.toArray))(bi => ByteVector(bi.toByteArray.reverse))
 
+  val fixedVariableInt32Codec: Codec[Int] =
+    fixedVariableCodec(8, _.toInt(), v => BigInt(v).toByteArray)
 
+  val fixedVariableInt64Codec: Codec[Long] =
+    fixedVariableCodec(12, _.toLong(), v => BigInt(v).toByteArray)
+
+  def fixedVariableCodec[T](fixedSize: Int, f: ByteVector => T, g: T => Array[Byte]): Codec[T] =
+    fixedSizeBytes(fixedSize, variableSizeBytes(int32, bytes).xmapc[T](f)(v => ByteVector(g(v))))
 }
